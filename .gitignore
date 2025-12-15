@@ -1,0 +1,19 @@
+*.exe
+
+# OS Specific
+.DS_Store
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# Local Environment Secrets (Very Important)
+.env
+
+# Raft Storage (Don't commit your database!)
+raft-data/
+*.db
+
+# Python bytecode
+__pycache__/
+*.pyc
