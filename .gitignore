@@ -1,3 +1,6 @@
+# Binaries (The compiled executable)
+raft-ml-grid
+main
 *.exe
 
 # OS Specific
@@ -17,3 +20,13 @@ raft-data/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# ML Datasets & Models (Added)
+# Ignore the raw MNIST data files
+*.gz
+*.ubyte
+# Ignore the default PyTorch data download folder
+data/
+# Ignore trained model weights
+*.pth
+*.pt
