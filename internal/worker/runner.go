@@ -47,7 +47,7 @@ func RunWorker(state *store.State, httpAddr string) {
 
 		// 2. Run the Job
 		log.Printf("🚀 Found Pending Job: %s. Starting Python...", jobToRun.ID)
-		result, err := runPythonScript(jobToRun.ID)
+		result, err := RunPythonScript(jobToRun.ID)
 
 		if err != nil {
 			log.Printf("❌ Job %s failed: %v", jobToRun.ID, err)
@@ -56,7 +56,7 @@ func RunWorker(state *store.State, httpAddr string) {
 
 		// 3. Report Success to Raft (Close the Loop!)
 		log.Printf("📬 Reporting completion for %s to Cluster...", jobToRun.ID)
-		if err := reportSuccess(httpAddr, result); err != nil {
+		if err := ReportSuccess(httpAddr, result); err != nil {
 			log.Printf("❌ Failed to report success: %v", err)
 		} else {
 			log.Printf("✅ Job %s cycle complete.", jobToRun.ID)
@@ -64,7 +64,7 @@ func RunWorker(state *store.State, httpAddr string) {
 	}
 }
 
-func runPythonScript(jobID string) (*PythonResult, error) {
+func RunPythonScript(jobID string) (*PythonResult, error) {
 	cmd := exec.Command("python3", "ml-code/train.py", jobID)
 	cmd.Stderr = os.Stderr
 	stdout, _ := cmd.StdoutPipe()
@@ -97,8 +97,8 @@ func runPythonScript(jobID string) (*PythonResult, error) {
 	return &result, nil
 }
 
-// reportSuccess sends the result back to the Leader via HTTP
-func reportSuccess(leaderAddr string, result *PythonResult) error {
+// ReportSuccess sends the result back to the Leader via HTTP
+func ReportSuccess(leaderAddr string, result *PythonResult) error {
 	// Construct the payload for the API
 	// Note: We are reusing the existing 'Job' struct structure
 	payload := map[string]interface{}{
