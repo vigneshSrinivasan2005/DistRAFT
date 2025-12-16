@@ -55,7 +55,10 @@ func main() {
 		}
 	}
 
-	// 6. Define HTTP API Handlers
+	// 6. Define cluster size (for now, hardcoded to 3 nodes)
+	clusterSize := 3
+
+	// 7. Define HTTP API Handlers
 	// These allow us to talk to the cluster using curl or Postman.
 
 	// Handler: Submit a new Job
@@ -72,10 +75,12 @@ func main() {
 		}
 
 		// Prepare the command for Raft
+		// Use SUBMIT_PARENT_JOB to automatically split into sub-jobs
 		event := consensus.LogEvent{
-			Type:  consensus.CmdSetJob,
-			JobID: job.ID,
-			Data:  &job,
+			Type:        consensus.CmdSubmitParentJob,
+			JobID:       job.ID,
+			Data:        &job,
+			ClusterSize: clusterSize,
 		}
 		eventBytes, _ := json.Marshal(event)
 
@@ -87,7 +92,7 @@ func main() {
 			return
 		}
 
-		w.Write([]byte("Job submitted successfully"))
+		w.Write([]byte(fmt.Sprintf("Parent job %s split into %d sub-jobs successfully", job.ID, clusterSize)))
 	})
 
 	// Handler: Join Cluster (Add a new node)
@@ -123,7 +128,54 @@ func main() {
 		}
 		json.NewEncoder(w).Encode(job)
 	})
-	go worker.RunWorker(fsmStore, *httpAddr)
+
+	// Handler: Update Job Status (used by workers to report completion)
+	http.HandleFunc("/update", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var update store.Job
+		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
+
+		// Get existing job to preserve all fields
+		existingJob, ok := fsmStore.GetJob(update.ID)
+		if !ok {
+			http.Error(w, "Job not found", http.StatusNotFound)
+			return
+		}
+
+		// Merge update fields with existing job
+		if update.Status != "" {
+			existingJob.Status = update.Status
+		}
+		if update.ResultURL != "" {
+			existingJob.ResultURL = update.ResultURL
+		}
+
+		// Use CmdSetJob for direct updates (no splitting)
+		event := consensus.LogEvent{
+			Type:  consensus.CmdSetJob,
+			JobID: existingJob.ID,
+			Data:  existingJob,
+		}
+		eventBytes, _ := json.Marshal(event)
+
+		applyFuture := rNode.Raft.Apply(eventBytes, 5*time.Second)
+		if err := applyFuture.Error(); err != nil {
+			http.Error(w, "Raft error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Write([]byte("Job updated successfully"))
+	})
+	
+	// 8. Start the worker goroutine
+	go worker.RunWorker(fsmStore, *httpAddr, *nodeID, clusterSize)
 
 	log.Printf("Server started on HTTP %s (Raft %s)", *httpAddr, *raftAddr)
 	log.Fatal(http.ListenAndServe(*httpAddr, nil))

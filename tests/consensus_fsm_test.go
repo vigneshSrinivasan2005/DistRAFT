@@ -49,6 +49,46 @@ func TestFSMApplyUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestFSMApplySubmitParentJob(t *testing.T) {
+	state := store.NewState()
+	fsm := consensus.NewFSM(state)
+
+	// Submit a parent job that should be split into 3 sub-jobs
+	event := consensus.LogEvent{
+		Type:        consensus.CmdSubmitParentJob,
+		JobID:       "job-1",
+		Data:        &store.Job{ID: "job-1", Type: "mnist_train", Status: store.StatusPending},
+		ClusterSize: 3,
+	}
+	data, _ := json.Marshal(event)
+	logEntry := &raft.Log{Data: data}
+
+	if got := fsm.Apply(logEntry); got != nil {
+		t.Fatalf("expected nil apply result, got %v", got)
+	}
+
+	// Verify 3 sub-jobs were created
+	expectedSubJobs := []string{"job-1-node-1", "job-1-node-2", "job-1-node-3"}
+	expectedWorkerIDs := []string{"node-1", "node-2", "node-3"}
+
+	for i, subJobID := range expectedSubJobs {
+		job, ok := state.GetJob(subJobID)
+		if !ok {
+			t.Fatalf("sub-job %s not found in state", subJobID)
+		}
+		if job.Type != "mnist_train" {
+			t.Fatalf("sub-job %s has wrong type: %s", subJobID, job.Type)
+		}
+		if job.Status != store.StatusPending {
+			t.Fatalf("sub-job %s has wrong status: %s", subJobID, job.Status)
+		}
+		if job.WorkerID != expectedWorkerIDs[i] {
+			t.Fatalf("sub-job %s has wrong worker_id: expected %s, got %s", 
+				subJobID, expectedWorkerIDs[i], job.WorkerID)
+		}
+	}
+}
+
 func TestFSMSnapshotAndRestore(t *testing.T) {
 	state := store.NewState()
 	state.Apply("job-1", &store.Job{ID: "job-1", Type: "mnist_train", Status: store.StatusRunning, WorkerID: "worker-a"})

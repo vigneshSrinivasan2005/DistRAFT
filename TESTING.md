@@ -38,19 +38,31 @@ Logs: tail -f /tmp/node*.log
 API:  curl -X POST localhost:8000/submit -d '{"id": "job-1", "status": "PENDING"}'
 ```
 
-### Test replication
-Once the cluster is running, submit a job to node 1 (leader):
+### Test distributed ML training
+Once the cluster is running, submit **one parent job** that automatically splits into 3 sub-jobs:
 ```bash
+# Submit a parent job - it will automatically create 3 sub-jobs
 curl -X POST http://localhost:8000/submit \
   -H "Content-Type: application/json" \
-  -d '{"id":"job-1","type":"mnist_train","status":"PENDING","worker_id":"","result_url":""}'
+  -d '{"id":"job-1","type":"mnist_train","status":"PENDING"}'
 ```
 
-Verify the job immediately propagated to followers:
+**What happens automatically:**
+- The FSM splits `job-1` into three sub-jobs: `job-1-node-1`, `job-1-node-2`, `job-1-node-3`
+- Each sub-job is assigned to its respective `worker_id` (node-1, node-2, node-3)
+- Node 1 picks up `job-1-node-1` and trains on samples 0-20,000
+- Node 2 picks up `job-1-node-2` and trains on samples 20,000-40,000
+- Node 3 picks up `job-1-node-3` and trains on samples 40,000-60,000
+- Watch logs (`make logs`) to see parallel training across all 3 shards
+
+Verify all sub-jobs completed and results are replicated:
 ```bash
-curl 'http://localhost:8000/job?id=job-1'  # Leader
-curl 'http://localhost:8001/job?id=job-1'  # Follower 2 - should return same data
-curl 'http://localhost:8002/job?id=job-1'  # Follower 3 - should return same data
+curl 'http://localhost:8000/job?id=job-1-node-1'  # Check node-1's sub-job
+curl 'http://localhost:8001/job?id=job-1-node-2'  # Check node-2's sub-job  
+curl 'http://localhost:8002/job?id=job-1-node-3'  # Check node-3's sub-job
+
+# All nodes have replicated state, so you can query any node for any job:
+curl 'http://localhost:8000/job?id=job-1-node-2'  # Query leader for node-2's job
 ```
 
 ### View logs

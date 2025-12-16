@@ -13,14 +13,16 @@ import (
 type CommandType string
 
 const (
-	CmdSetJob CommandType = "SET_JOB"
+	CmdSetJob         CommandType = "SET_JOB"
+	CmdSubmitParentJob CommandType = "SUBMIT_PARENT_JOB"
 )
 
 // LogEvent is what we actually write to the Raft log
 type LogEvent struct {
-	Type  CommandType `json:"type"`
-	JobID string      `json:"job_id"`
-	Data  *store.Job  `json:"data"`
+	Type        CommandType `json:"type"`
+	JobID       string      `json:"job_id"`
+	Data        *store.Job  `json:"data"`
+	ClusterSize int         `json:"cluster_size,omitempty"` // For parent job splitting
 }
 
 // FSM implementation
@@ -42,6 +44,24 @@ func (f *FSM) Apply(l *raft.Log) interface{} {
 	switch event.Type {
 	case CmdSetJob:
 		f.state.Apply(event.JobID, event.Data)
+		return nil
+	case CmdSubmitParentJob:
+		// Split parent job into sub-jobs for each node
+		if event.Data == nil || event.ClusterSize == 0 {
+			return fmt.Errorf("invalid parent job: missing data or cluster size")
+		}
+		for i := 1; i <= event.ClusterSize; i++ {
+			nodeID := fmt.Sprintf("node-%d", i)
+			subJobID := fmt.Sprintf("%s-%s", event.JobID, nodeID)
+			subJob := &store.Job{
+				ID:        subJobID,
+				Type:      event.Data.Type,
+				Status:    store.StatusPending,
+				WorkerID:  nodeID,
+				ResultURL: "",
+			}
+			f.state.Apply(subJobID, subJob)
+		}
 		return nil
 	default:
 		return fmt.Errorf("unknown command type: %s", event.Type)

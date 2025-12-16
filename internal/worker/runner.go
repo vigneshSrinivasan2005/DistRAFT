@@ -24,17 +24,17 @@ type PythonResult struct {
 	ModelPath string  `json:"model_path"`
 }
 
-func RunWorker(state *store.State, httpAddr string) {
-	log.Println("👷 WORKER STARTED: Listening for jobs...")
+func RunWorker(state *store.State, httpAddr string, nodeID string, clusterSize int) {
+	log.Printf("👷 WORKER STARTED: Node %s (Cluster Size: %d)\n", nodeID, clusterSize)
 
 	for {
 		time.Sleep(2 * time.Second)
 
-		// 1. Find a Pending Job
+		// 1. Find a Pending Job assigned to this worker
 		var jobToRun *store.Job
 		state.RLock()
 		for _, job := range state.Jobs {
-			if job.Status == store.StatusPending {
+			if job.Status == store.StatusPending && job.WorkerID == nodeID {
 				jobToRun = job
 				break
 			}
@@ -47,7 +47,7 @@ func RunWorker(state *store.State, httpAddr string) {
 
 		// 2. Run the Job
 		log.Printf("🚀 Found Pending Job: %s. Starting Python...", jobToRun.ID)
-		result, err := RunPythonScript(jobToRun.ID)
+		result, err := RunPythonScript(jobToRun.ID, nodeID, clusterSize)
 
 		if err != nil {
 			log.Printf("❌ Job %s failed: %v", jobToRun.ID, err)
@@ -55,8 +55,9 @@ func RunWorker(state *store.State, httpAddr string) {
 		}
 
 		// 3. Report Success to Raft (Close the Loop!)
+		// Always report to leader on port 8000
 		log.Printf("📬 Reporting completion for %s to Cluster...", jobToRun.ID)
-		if err := ReportSuccess(httpAddr, result); err != nil {
+		if err := ReportSuccess(":8000", result); err != nil {
 			log.Printf("❌ Failed to report success: %v", err)
 		} else {
 			log.Printf("✅ Job %s cycle complete.", jobToRun.ID)
@@ -64,8 +65,10 @@ func RunWorker(state *store.State, httpAddr string) {
 	}
 }
 
-func RunPythonScript(jobID string) (*PythonResult, error) {
-	cmd := exec.Command("python3", "ml-code/train.py", jobID)
+func RunPythonScript(jobID string, shardIndex string, totalShards int) (*PythonResult, error) {
+	cmd := exec.Command("python3", "ml-code/train.py", jobID,
+		"--shard_index", shardIndex,
+		"--total_shards", fmt.Sprintf("%d", totalShards))
 	cmd.Stderr = os.Stderr
 	stdout, _ := cmd.StdoutPipe()
 
@@ -108,7 +111,7 @@ func ReportSuccess(leaderAddr string, result *PythonResult) error {
 	}
 
 	data, _ := json.Marshal(payload)
-	resp, err := http.Post("http://localhost"+leaderAddr+"/submit", "application/json", bytes.NewBuffer(data))
+	resp, err := http.Post("http://localhost"+leaderAddr+"/update", "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		return err
 	}

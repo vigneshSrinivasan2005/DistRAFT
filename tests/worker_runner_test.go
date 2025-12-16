@@ -20,7 +20,8 @@ func TestReportSuccess(t *testing.T) {
 	receivedPayload := map[string]interface{}{}
 
 	mockLeader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/submit" {
+		// Accept both legacy "/submit" and new "/update" paths
+		if r.URL.Path != "/submit" && r.URL.Path != "/update" {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
@@ -120,7 +121,8 @@ func TestWorkerLoopWithMockLeader(t *testing.T) {
 	jobsReceived := []map[string]interface{}{}
 
 	mockLeader := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/submit" {
+		// Accept both legacy "/submit" and new "/update" paths
+		if r.URL.Path != "/submit" && r.URL.Path != "/update" {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}

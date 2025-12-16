@@ -2,22 +2,36 @@
 import sys
 import os
 import json
+import argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 
 # --- 1. ARGUMENT PARSING (Contract with Go) ---
-if len(sys.argv) < 2:
-    # Fallback for manual testing
-    print("Warning: No Job ID provided. Using 'manual-test'.")
-    JOB_ID = "manual-test"
+parser = argparse.ArgumentParser(description='Distributed MNIST Training')
+parser.add_argument('job_id', type=str, help='Job ID')
+parser.add_argument('--shard_index', type=str, default='node-1', help='Worker shard index (e.g., node-1, node-2)')
+parser.add_argument('--total_shards', type=int, default=1, help='Total number of shards (cluster size)')
+
+args = parser.parse_args()
+JOB_ID = args.job_id
+SHARD_INDEX = args.shard_index
+TOTAL_SHARDS = args.total_shards
+
+# Convert node-1, node-2, node-3 to numeric index 0, 1, 2
+if SHARD_INDEX.startswith('node-'):
+    NUMERIC_SHARD = int(SHARD_INDEX.split('-')[1]) - 1
 else:
-    JOB_ID = sys.argv[1]
+    NUMERIC_SHARD = 0
 
 # Define where to save this specific job's model
+os.makedirs("./raft-data", exist_ok=True)
 MODEL_PATH = f"./raft-data/{JOB_ID}_model.pth"
+
+print(f"[Python] 🚀 Starting Training for Job: {JOB_ID}")
+print(f"[Python] 📊 Shard {NUMERIC_SHARD + 1}/{TOTAL_SHARDS} (Worker: {SHARD_INDEX})")
 
 class SimpleNN(nn.Module):
     def __init__(self):
@@ -86,17 +100,26 @@ def train_model(model, train_loader, device, epochs=1):
     return final_loss, final_acc
 
 def main():
-    # Force print to flush immediately so Go logs are real-time
-    print(f"[Python] 🚀 Starting Training for Job: {JOB_ID}")
     sys.stdout.flush()
 
     try:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Use a subset of data for speed in this demo
+        # Download full dataset
         full_dataset = download_mnist()
-        subset_indices = torch.arange(2000) # Only train on 2000 images for speed
-        train_dataset = torch.utils.data.Subset(full_dataset, subset_indices)
+        
+        # --- DATA SHARDING LOGIC ---
+        total_size = len(full_dataset)  # 60,000 for MNIST train
+        chunk_size = total_size // TOTAL_SHARDS
+        start = NUMERIC_SHARD * chunk_size
+        end = start + chunk_size if NUMERIC_SHARD < TOTAL_SHARDS - 1 else total_size
+        
+        print(f"[Python] 📦 Dataset shard: {start} to {end} ({end - start} samples)")
+        sys.stdout.flush()
+        
+        # Create subset for this shard
+        indices = list(range(start, end))
+        train_dataset = Subset(full_dataset, indices)
         train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 
         model = SimpleNN().to(device)
