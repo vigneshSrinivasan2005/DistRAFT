@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/raft"
 	"github.com/vigneshSrinivasan2005/DistRAFT/internal/consensus"
 	"github.com/vigneshSrinivasan2005/DistRAFT/internal/store"
+	"github.com/vigneshSrinivasan2005/DistRAFT/internal/worker"
 )
 
 func main() {
@@ -122,6 +123,7 @@ func main() {
 		}
 		json.NewEncoder(w).Encode(job)
 	})
+	go worker.RunWorker(fsmStore, *httpAddr)
 
 	log.Printf("Server started on HTTP %s (Raft %s)", *httpAddr, *raftAddr)
 	log.Fatal(http.ListenAndServe(*httpAddr, nil))
