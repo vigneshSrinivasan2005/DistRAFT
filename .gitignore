@@ -1,5 +1,6 @@
 # Binaries (The compiled executable)
 raft-ml-grid
+raft-node
 main
 *.exe
 
