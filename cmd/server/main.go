@@ -11,6 +11,7 @@ import (
 
 	"github.com/hashicorp/raft"
 	"github.com/vigneshSrinivasan2005/DistRAFT/internal/consensus"
+	"github.com/vigneshSrinivasan2005/DistRAFT/internal/master"
 	"github.com/vigneshSrinivasan2005/DistRAFT/internal/store"
 	"github.com/vigneshSrinivasan2005/DistRAFT/internal/worker"
 )
@@ -156,12 +157,21 @@ func main() {
 		if update.ResultURL != "" {
 			existingJob.ResultURL = update.ResultURL
 		}
+		if update.StartedAt > 0 {
+			existingJob.StartedAt = update.StartedAt
+		}
+		if update.UpdatedAt > 0 {
+			existingJob.UpdatedAt = update.UpdatedAt
+		}
+		if update.RetryCount > 0 {
+			existingJob.RetryCount = update.RetryCount
+		}
 
 		// Use CmdSetJob for direct updates (no splitting)
 		event := consensus.LogEvent{
 			Type:  consensus.CmdSetJob,
 			JobID: existingJob.ID,
-			Data:  existingJob,
+			Job:   existingJob,
 		}
 		eventBytes, _ := json.Marshal(event)
 
@@ -173,9 +183,15 @@ func main() {
 
 		w.Write([]byte("Job updated successfully"))
 	})
-	
+
 	// 8. Start the worker goroutine
 	go worker.RunWorker(fsmStore, *httpAddr, *nodeID, clusterSize)
+
+	// 9. Start the health monitor (checks for stuck jobs and reassigns them)
+	go worker.RunHealthMonitor(fsmStore, rNode, clusterSize)
+
+	// 10. Start the aggregator (leader-only preferred; harmless on followers)
+	go master.RunAggregator(fsmStore, "", 2*time.Second)
 
 	log.Printf("Server started on HTTP %s (Raft %s)", *httpAddr, *raftAddr)
 	log.Fatal(http.ListenAndServe(*httpAddr, nil))

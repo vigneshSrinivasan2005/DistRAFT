@@ -45,16 +45,30 @@ func RunWorker(state *store.State, httpAddr string, nodeID string, clusterSize i
 			continue
 		}
 
-		// 2. Run the Job
+		// 2. Mark job as RUNNING with timestamp
+		jobToRun.Status = store.StatusRunning
+		jobToRun.StartedAt = time.Now().Unix()
+		jobToRun.UpdatedAt = time.Now().Unix()
+		if err := UpdateJobStatus(":8000", jobToRun); err != nil {
+			log.Printf("⚠️ Failed to update job to RUNNING: %v", err)
+		}
+
+		// 3. Run the Job
 		log.Printf("🚀 Found Pending Job: %s. Starting Python...", jobToRun.ID)
 		result, err := RunPythonScript(jobToRun.ID, nodeID, clusterSize)
 
 		if err != nil {
 			log.Printf("❌ Job %s failed: %v", jobToRun.ID, err)
+			// Mark as failed
+			jobToRun.Status = store.StatusFailed
+			jobToRun.UpdatedAt = time.Now().Unix()
+			if err := UpdateJobStatus(":8000", jobToRun); err != nil {
+				log.Printf("⚠️ Failed to update job to FAILED: %v", err)
+			}
 			continue
 		}
 
-		// 3. Report Success to Raft (Close the Loop!)
+		// 4. Report Success to Raft (Close the Loop!)
 		// Always report to leader on port 8000
 		log.Printf("📬 Reporting completion for %s to Cluster...", jobToRun.ID)
 		if err := ReportSuccess(":8000", result); err != nil {
@@ -108,6 +122,29 @@ func ReportSuccess(leaderAddr string, result *PythonResult) error {
 		"id":         result.JobID,
 		"status":     "COMPLETED",
 		"result_url": result.ModelPath,
+	}
+
+	data, _ := json.Marshal(payload)
+	resp, err := http.Post("http://localhost"+leaderAddr+"/update", "application/json", bytes.NewBuffer(data))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("server returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// UpdateJobStatus sends a job status update to the leader
+func UpdateJobStatus(leaderAddr string, job *store.Job) error {
+	payload := map[string]interface{}{
+		"id":          job.ID,
+		"status":      string(job.Status),
+		"started_at":  job.StartedAt,
+		"updated_at":  job.UpdatedAt,
+		"retry_count": job.RetryCount,
 	}
 
 	data, _ := json.Marshal(payload)

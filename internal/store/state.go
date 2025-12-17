@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"sync"
+	"time"
 )
 
 type JobStatus string
@@ -16,11 +17,14 @@ const (
 
 // Job represents a single ML task
 type Job struct {
-	ID        string    `json:"id"`
-	Type      string    `json:"type"` // e.g., "mnist_train"
-	Status    JobStatus `json:"status"`
-	WorkerID  string    `json:"worker_id"` // Which node is doing the work?
-	ResultURL string    `json:"result_url"`
+	ID         string    `json:"id"`
+	Type       string    `json:"type"` // e.g., "mnist_train"
+	Status     JobStatus `json:"status"`
+	WorkerID   string    `json:"worker_id"` // Which node is doing the work?
+	ResultURL  string    `json:"result_url"`
+	StartedAt  int64     `json:"started_at,omitempty"`  // Unix timestamp when job started
+	UpdatedAt  int64     `json:"updated_at,omitempty"`  // Unix timestamp of last update
+	RetryCount int       `json:"retry_count,omitempty"` // Number of retry attempts
 }
 
 // State is the thread-safe "Database"
@@ -62,4 +66,35 @@ func (s *State) Unmarshal(data []byte) error {
 	s.Lock()
 	defer s.Unlock()
 	return json.Unmarshal(data, &s.Jobs)
+}
+
+// GetAllJobs returns a snapshot of all jobs
+func (s *State) GetAllJobs() map[string]*Job {
+	s.RLock()
+	defer s.RUnlock()
+	snapshot := make(map[string]*Job, len(s.Jobs))
+	for k, v := range s.Jobs {
+		snapshot[k] = v
+	}
+	return snapshot
+}
+
+// GetStuckJobs returns jobs that have been running longer than timeout
+func (s *State) GetStuckJobs(timeoutSeconds int64) []*Job {
+	s.RLock()
+	defer s.RUnlock()
+	
+	var stuck []*Job
+	now := time.Now().Unix()
+	
+	for _, job := range s.Jobs {
+		if job.Status == StatusRunning && job.StartedAt > 0 {
+			elapsed := now - job.StartedAt
+			if elapsed > timeoutSeconds {
+				stuck = append(stuck, job)
+			}
+		}
+	}
+	
+	return stuck
 }

@@ -83,7 +83,7 @@ func TestFSMApplySubmitParentJob(t *testing.T) {
 			t.Fatalf("sub-job %s has wrong status: %s", subJobID, job.Status)
 		}
 		if job.WorkerID != expectedWorkerIDs[i] {
-			t.Fatalf("sub-job %s has wrong worker_id: expected %s, got %s", 
+			t.Fatalf("sub-job %s has wrong worker_id: expected %s, got %s",
 				subJobID, expectedWorkerIDs[i], job.WorkerID)
 		}
 	}

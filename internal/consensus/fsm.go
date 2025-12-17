@@ -13,7 +13,7 @@ import (
 type CommandType string
 
 const (
-	CmdSetJob         CommandType = "SET_JOB"
+	CmdSetJob          CommandType = "SET_JOB"
 	CmdSubmitParentJob CommandType = "SUBMIT_PARENT_JOB"
 )
 
@@ -21,7 +21,8 @@ const (
 type LogEvent struct {
 	Type        CommandType `json:"type"`
 	JobID       string      `json:"job_id"`
-	Data        *store.Job  `json:"data"`
+	Job         *store.Job  `json:"job,omitempty"`  // Job data for SET_JOB
+	Data        *store.Job  `json:"data,omitempty"` // Deprecated: use Job instead
 	ClusterSize int         `json:"cluster_size,omitempty"` // For parent job splitting
 }
 
@@ -43,19 +44,28 @@ func (f *FSM) Apply(l *raft.Log) interface{} {
 
 	switch event.Type {
 	case CmdSetJob:
-		f.state.Apply(event.JobID, event.Data)
+		// Support both Job and Data fields for backwards compatibility
+		job := event.Job
+		if job == nil {
+			job = event.Data
+		}
+		f.state.Apply(event.JobID, job)
 		return nil
 	case CmdSubmitParentJob:
 		// Split parent job into sub-jobs for each node
-		if event.Data == nil || event.ClusterSize == 0 {
+		parentJob := event.Job
+		if parentJob == nil {
+			parentJob = event.Data
+		}
+		if parentJob == nil || event.ClusterSize == 0 {
 			return fmt.Errorf("invalid parent job: missing data or cluster size")
 		}
 		for i := 1; i <= event.ClusterSize; i++ {
-			nodeID := fmt.Sprintf("node-%d", i)
+			nodeID := NodeIDFromIndex(i)
 			subJobID := fmt.Sprintf("%s-%s", event.JobID, nodeID)
 			subJob := &store.Job{
 				ID:        subJobID,
-				Type:      event.Data.Type,
+				Type:      parentJob.Type,
 				Status:    store.StatusPending,
 				WorkerID:  nodeID,
 				ResultURL: "",
@@ -107,3 +117,19 @@ func (s *fsmSnapshot) Persist(sink raft.SnapshotSink) error {
 }
 
 func (s *fsmSnapshot) Release() {}
+
+// Helper functions
+
+// NodeIDFromIndex converts node index (1, 2, 3) to node ID ("node-1", "node-2", "node-3")
+func NodeIDFromIndex(index int) string {
+	return fmt.Sprintf("node-%d", index)
+}
+
+// MustMarshalEvent marshals a LogEvent and panics on error (for internal use)
+func MustMarshalEvent(event LogEvent) []byte {
+	data, err := json.Marshal(event)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal event: %v", err))
+	}
+	return data
+}
