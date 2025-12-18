@@ -22,15 +22,8 @@ func TestNewRaftNodeCreatesResources(t *testing.T) {
 		return consensus.NewRaftNode("node-test", "127.0.0.1:0", raftDir, state)
 	})
 	t.Cleanup(func() {
-		done := make(chan struct{})
-		go func() {
-			_ = node.Raft.Shutdown().Error()
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-time.After(15 * time.Second):
-			t.Fatalf("shutdown timeout")
+		if err := node.Close(); err != nil {
+			t.Logf("error closing node: %v", err)
 		}
 	})
 

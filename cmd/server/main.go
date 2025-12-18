@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/hashicorp/raft"
@@ -193,6 +196,40 @@ func main() {
 	// 10. Start the aggregator (leader-only preferred; harmless on followers)
 	go master.RunAggregator(fsmStore, "", 2*time.Second)
 
-	log.Printf("Server started on HTTP %s (Raft %s)", *httpAddr, *raftAddr)
-	log.Fatal(http.ListenAndServe(*httpAddr, nil))
+	// 11. Setup graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Create HTTP server
+	server := &http.Server{
+		Addr:              *httpAddr,
+		Handler:           nil,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	// Start server in a goroutine
+	go func() {
+		log.Printf("Server started on HTTP %s (Raft %s)", *httpAddr, *raftAddr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	// Wait for shutdown signal
+	<-sigChan
+	log.Println("Shutting down gracefully...")
+
+	// Shutdown HTTP server
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("HTTP server shutdown error: %v", err)
+	}
+
+	// Close Raft node and BoltDB file handles
+	if err := rNode.Close(); err != nil {
+		log.Printf("Raft node close error: %v", err)
+	}
+
+	log.Println("Server stopped")
 }

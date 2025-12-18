@@ -12,8 +12,10 @@ import (
 )
 
 type RaftNode struct {
-	Raft *raft.Raft
-	FSM  *FSM
+	Raft      *raft.Raft
+	FSM       *FSM
+	logStore  raft.LogStore       // Keep reference to close on shutdown
+	stableStore raft.StableStore  // Keep reference to close on shutdown
 }
 
 func NewRaftNode(nodeID, raftAddr, raftDir string, state *store.State) (*RaftNode, error) {
@@ -53,8 +55,22 @@ func NewRaftNode(nodeID, raftAddr, raftDir string, state *store.State) (*RaftNod
 	// Start Raft
 	r, err := raft.NewRaft(config, fsm, logStore, stableStore, snapshotStore, transport)
 	if err != nil {
+		logStore.Close()
 		return nil, err
 	}
 
-	return &RaftNode{Raft: r, FSM: fsm}, nil
+	return &RaftNode{Raft: r, FSM: fsm, logStore: logStore, stableStore: stableStore}, nil
+}
+
+// Close gracefully shuts down the Raft node and closes all file handles.
+func (n *RaftNode) Close() error {
+	// First shutdown Raft
+	if err := n.Raft.Shutdown().Error(); err != nil {
+		return err
+	}
+	// Then close the log store (which is also the stable store)
+	if closer, ok := n.logStore.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
+	return nil
 }
