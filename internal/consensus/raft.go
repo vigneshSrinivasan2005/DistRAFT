@@ -12,10 +12,10 @@ import (
 )
 
 type RaftNode struct {
-	Raft      *raft.Raft
-	FSM       *FSM
-	logStore  raft.LogStore       // Keep reference to close on shutdown
-	stableStore raft.StableStore  // Keep reference to close on shutdown
+	Raft        *raft.Raft
+	FSM         *FSM
+	logStore    raft.LogStore    // Keep reference to close on shutdown
+	stableStore raft.StableStore // Keep reference to close on shutdown
 }
 
 func NewRaftNode(nodeID, raftAddr, raftDir string, state *store.State) (*RaftNode, error) {
