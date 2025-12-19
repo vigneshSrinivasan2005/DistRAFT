@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package api;
 
-option go_package = "github.com/yourusername/raft-ml-grid/internal/api";
+option go_package = "github.com/vigneshSrinivasan2005/DistRAFT/internal/api";
 
 service MLWorkerService {
   rpc GetModel (ModelRequest) returns (stream ModelChunk);
